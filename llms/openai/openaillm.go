@@ -100,6 +100,7 @@ func (o *LLM) GenerateContent(ctx context.Context, messages []llms.MessageConten
 		StopWords:        opts.StopWords,
 		Messages:         chatMsgs,
 		StreamingFunc:    opts.StreamingFunc,
+		ReasoningStreamingFunc: opts.ReasoningStreamingFunc,
 		Temperature:      opts.Temperature,
 		N:                opts.N,
 		FrequencyPenalty: opts.FrequencyPenalty,
@@ -152,9 +153,14 @@ func (o *LLM) GenerateContent(ctx context.Context, messages []llms.MessageConten
 
 	choices := make([]*llms.ContentChoice, len(result.Choices))
 	for i, c := range result.Choices {
+		reasoningContent := c.Message.ReasoningContent
+		if c.Message.Reasoning != "" {
+			reasoningContent = c.Message.Reasoning
+		}
 		choices[i] = &llms.ContentChoice{
-			Content:    c.Message.Content,
-			StopReason: fmt.Sprint(c.FinishReason),
+			Content:          c.Message.Content,
+			ReasoningContent: reasoningContent,
+			StopReason:       fmt.Sprint(c.FinishReason),
 			GenerationInfo: map[string]any{
 				"CompletionTokens": result.Usage.CompletionTokens,
 				"PromptTokens":     result.Usage.PromptTokens,

@@ -66,6 +66,9 @@ type ChatRequest struct {
 	// StreamingFunc is a function to be called for each chunk of a streaming response.
 	// Return an error to stop streaming early.
 	StreamingFunc func(ctx context.Context, chunk []byte) error `json:"-"`
+	// ReasoningStreamingFunc is a function to be called for each chunk of a reasoning streaming response.
+	// Return an error to stop streaming early.
+	ReasoningStreamingFunc func(ctx context.Context, chunk []byte) error `json:"-"`
 
 	// Deprecated: use Tools instead.
 	Functions []FunctionDefinition `json:"functions,omitempty"`
@@ -160,6 +163,9 @@ type ChatMessage struct { //nolint:musttag
 
 	// This field is only used with the deepseek-reasoner model and represents the reasoning contents of the assistant message before the final answer.
 	ReasoningContent string `json:"reasoning_content,omitempty"`
+
+	// Reasoning is the reasoning content of the message.
+	Reasoning string `json:"reasoning,omitempty"`
 }
 
 func (m ChatMessage) MarshalJSON() ([]byte, error) {
@@ -187,6 +193,9 @@ func (m ChatMessage) MarshalJSON() ([]byte, error) {
 
 			// This field is only used with the deepseek-reasoner model and represents the reasoning contents of the assistant message before the final answer.
 			ReasoningContent string `json:"reasoning_content,omitempty"`
+
+			// Reasoning is the reasoning content of the message.
+			Reasoning string `json:"reasoning,omitempty"`
 		}(m)
 		return json.Marshal(msg)
 	}
@@ -205,6 +214,9 @@ func (m ChatMessage) MarshalJSON() ([]byte, error) {
 
 		// This field is only used with the deepseek-reasoner model and represents the reasoning contents of the assistant message before the final answer.
 		ReasoningContent string `json:"reasoning_content,omitempty"`
+
+		// Reasoning is the reasoning content of the message.
+		Reasoning string `json:"reasoning,omitempty"`
 	}(m)
 	return json.Marshal(msg)
 }
@@ -233,6 +245,9 @@ func (m *ChatMessage) UnmarshalJSON(data []byte) error {
 
 		// This field is only used with the deepseek-reasoner model and represents the reasoning contents of the assistant message before the final answer.
 		ReasoningContent string `json:"reasoning_content,omitempty"`
+
+		// Reasoning is the reasoning content of the message.
+		Reasoning string `json:"reasoning,omitempty"`
 	}{}
 	err := json.Unmarshal(data, &msg)
 	if err != nil {
@@ -336,6 +351,9 @@ type StreamedChatResponsePayload struct {
 			ToolCalls []*ToolCall `json:"tool_calls,omitempty"`
 			// This field is only used with the deepseek-reasoner model and represents the reasoning contents of the assistant message before the final answer.
 			ReasoningContent string `json:"reasoning_content,omitempty"`
+
+			// Reasoning is the reasoning content of the message.
+			Reasoning string `json:"reasoning,omitempty"`
 		} `json:"delta,omitempty"`
 		FinishReason FinishReason `json:"finish_reason,omitempty"`
 	} `json:"choices,omitempty"`
@@ -492,10 +510,19 @@ func combineStreamingChatResponse(
 			continue
 		}
 		choice := streamResponse.Choices[0]
-		chunk := []byte(choice.Delta.Content)
+
 		response.Choices[0].Message.Content += choice.Delta.Content
 		response.Choices[0].FinishReason = choice.FinishReason
-		response.Choices[0].Message.ReasoningContent = choice.Delta.ReasoningContent
+		response.Choices[0].Message.ReasoningContent += choice.Delta.ReasoningContent
+		response.Choices[0].Message.Reasoning += choice.Delta.Reasoning
+
+		chunk := []byte(choice.Delta.Content)
+		var reasoningChunk []byte
+		if choice.Delta.ReasoningContent != "" {
+			reasoningChunk = []byte(choice.Delta.ReasoningContent)
+		} else if choice.Delta.Reasoning != "" {
+			reasoningChunk = []byte(choice.Delta.Reasoning)
+		}
 
 		if choice.Delta.FunctionCall != nil {
 			chunk = updateFunctionCall(response.Choices[0].Message, choice.Delta.FunctionCall)
@@ -506,10 +533,22 @@ func combineStreamingChatResponse(
 				choice.Delta.ToolCalls)
 		}
 
-		if payload.StreamingFunc != nil {
-			err := payload.StreamingFunc(ctx, chunk)
-			if err != nil {
-				return nil, fmt.Errorf("streaming func returned an error: %w", err)
+		if len(chunk) > 0 {
+			if payload.StreamingFunc != nil {
+				err := payload.StreamingFunc(ctx, chunk)
+				if err != nil {
+					return nil, fmt.Errorf("streaming func returned an error: %w", err)
+				}
+			}
+		}
+		if len(reasoningChunk) > 0 {
+			if payload.ReasoningStreamingFunc != nil {
+				err := payload.ReasoningStreamingFunc(ctx, reasoningChunk)
+				if err != nil {
+					return nil, fmt.Errorf("reasoning streaming func returned an error: %w", err)
+				}
+			} else {
+				chunk = reasoningChunk
 			}
 		}
 	}
